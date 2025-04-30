@@ -1,0 +1,34 @@
+# python files
+venv/
+__pycache__
+.ipynb_checkpoints/
+uv.lock
+
+# downloaded models/datasets
+# bitnet_b1_58-xl/
+# bitnet_b1_58-large/
+semeval25-unlearning-data/
+semeval25-unlearning-model/
+semeval25-unlearning-1B-model/
+
+# logs
+logs/
+
+# metacentre job output files
+*.o[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]
+*.o[0-9][0-9][0-9][0-9][0-9][0-9][0-9]
+*.e[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]
+*.e[0-9][0-9][0-9][0-9][0-9][0-9][0-9]
+
+# evaluation files
+output/
+
+*.tar.gz
+*.tar
+*.pdf
+
+hf_token.txt
+
+logdir.txt
+
+jupyter/unrelated/checkpoint*
