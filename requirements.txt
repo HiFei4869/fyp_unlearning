@@ -11,7 +11,7 @@ ipywidgets
 sentencepiece
 protobuf
 accelerate
-datasets
+datasets>=2.16.0
 rouge-score
 scikit-learn
 tensorboard

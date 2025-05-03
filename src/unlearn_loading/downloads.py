@@ -1,15 +1,43 @@
 #!/usr/bin/env python3
 
+import os
 import pandas as pd
-from huggingface_hub import snapshot_download
+import argparse
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import os
 import argparse
-
+import torch
 
 def download_model(
-    path="semeval25-unlearning-model"
+    path="semeval25-unlearning-model",
+    model_type="OLMo"
 ) -> tuple[AutoModelForCausalLM, AutoTokenizer]:
+    """Download and load the specified model.
+    
+    Args:
+        path: Path to save the model
+        model_type: Type of model to load ("OLMo" for OLMo-7B or "Llama-2-7b-chat" for TOFU Llama model)
+    """
+    if model_type == "Llama-2-7b-chat":
+        print("Using Llama-2-7b-chat model")
+        # Load tokenizer from Meta's base model
+        tokenizer = AutoTokenizer.from_pretrained(
+            "meta-llama/Llama-2-7b-chat-hf",
+            use_fast=True,
+            trust_remote_code=True
+        )
+        # Set padding token to be the same as EOS token
+        tokenizer.pad_token = tokenizer.eos_token
+        print("Loading model from local directory:", path)
+        model = AutoModelForCausalLM.from_pretrained(
+            path,
+            device_map="auto",
+            torch_dtype=torch.bfloat16,
+            trust_remote_code=True
+        )
+        return model, tokenizer
+    
+    # Default OLMo model
     if not os.path.isdir(path):
         os.makedirs(path, exist_ok=True)
         snapshot_download(
@@ -22,8 +50,30 @@ def download_model(
 
 
 def download_model_1B(
-    path="semeval25-unlearning-1B-model"
-) -> AutoModelForCausalLM:
+    path="semeval25-unlearning-1B-model",
+    model_type="1B"
+) -> tuple[AutoModelForCausalLM, AutoTokenizer]:
+    """Download and load the specified 1B model.
+    
+    Args:
+        path: Path to save the model
+        model_type: Type of model to load ("1B" for OLMo-1B or "Llama-3.2-1B" for Meta's Llama model)
+    """
+    if model_type == "Llama-3.2-1B":
+        print("Using Llama-3.2-1B model")
+        tokenizer = AutoTokenizer.from_pretrained(
+            "meta-llama/Llama-3.2-1B",
+            trust_remote_code=True
+        )
+        # Set padding token to be the same as EOS token
+        tokenizer.pad_token = tokenizer.eos_token
+        return AutoModelForCausalLM.from_pretrained(
+            "meta-llama/Llama-3.2-1B",
+            device_map="auto",
+            trust_remote_code=True
+        ), tokenizer
+    
+    # Default OLMo-1B model
     if not os.path.isdir(path):
         os.makedirs(path, exist_ok=True)
         snapshot_download(
@@ -37,57 +87,52 @@ def download_model_1B(
 
 
 def download_datasets(
-    path="semeval25-unlearning-data"
+    path="semeval25-unlearning-data",
+    val_split=0.1,
+    seed=42
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Download and process TOFU datasets"""
     if not os.path.isdir(path):
         os.makedirs(path, exist_ok=True)
         os.makedirs(path + "/data", exist_ok=True)
 
-        # load LUME ids consistent with the task setup
+        # Load datasets
+        forget_ds = load_dataset("locuslab/TOFU", "forget01")["train"]
+        retain_ds = load_dataset("locuslab/TOFU", "retain99")["train"]
 
-        id_path = os.path.join(os.path.dirname(__file__), "sample_ids")
+        # Split into train/val
+        forget_splits = forget_ds.train_test_split(test_size=val_split, seed=seed)
+        retain_splits = retain_ds.train_test_split(test_size=val_split, seed=seed)
 
-        forget_train_ids = []
-        with open(os.path.join(id_path, "forget_train_ids.txt"), "r") as f:
-            for line in f:
-                line = line.strip()
-                if line == "":
-                    continue
-                forget_train_ids.append(line)
-        forget_val_ids = []
-        with open(os.path.join(id_path, "forget_val_ids.txt"), "r") as f:
-            for line in f:
-                line = line.strip()
-                if line == "":
-                    continue
-                forget_val_ids.append(line)
-        retain_train_ids = []
-        with open(os.path.join(id_path, "retain_train_ids.txt"), "r") as f:
-            for line in f:
-                line = line.strip()
-                if line == "":
-                    continue
-                retain_train_ids.append(line)
-        retain_val_ids = []
-        with open(os.path.join(id_path, "retain_val_ids.txt"), "r") as f:
-            for line in f:
-                line = line.strip()
-                if line == "":
-                    continue
-                retain_val_ids.append(line)
+        # Transform format and add IDs
+        forget_train = forget_splits["train"].map(
+            lambda x: transform_dataset_format(x, start_id=0, is_forget=True),
+            batched=True,
+            remove_columns=forget_splits["train"].column_names
+        )
+        forget_val = forget_splits["test"].map(
+            lambda x: transform_dataset_format(x, start_id=len(forget_train), is_forget=True),
+            batched=True,
+            remove_columns=forget_splits["test"].column_names
+        )
+        retain_train = retain_splits["train"].map(
+            lambda x: transform_dataset_format(x, start_id=len(forget_train) + len(forget_val), is_forget=False),
+            batched=True,
+            remove_columns=retain_splits["train"].column_names
+        )
+        retain_val = retain_splits["test"].map(
+            lambda x: transform_dataset_format(x, start_id=len(forget_train) + len(forget_val) + len(retain_train), is_forget=False),
+            batched=True,
+            remove_columns=retain_splits["test"].column_names
+        )
 
-        jsonl_url = "https://raw.githubusercontent.com/amazon-science/lume-llm-unlearning/refs/heads/main/data/forget.jsonl"
-        orig_set = pd.read_json(jsonl_url, lines=True)
+        # Convert to pandas and save
+        forget_train_df = pd.DataFrame(forget_train)
+        forget_validation_df = pd.DataFrame(forget_val)
+        retain_train_df = pd.DataFrame(retain_train)
+        retain_validation_df = pd.DataFrame(retain_val)
 
-        retain_jsonl_url = "https://raw.githubusercontent.com/amazon-science/lume-llm-unlearning/refs/heads/main/data/retain.jsonl"
-        retain_set = pd.read_json(retain_jsonl_url, lines=True)
-
-        forget_train_df = orig_set[orig_set["id"].isin(forget_train_ids)]
-        forget_validation_df = orig_set[orig_set["id"].isin(forget_val_ids)]
-        retain_train_df = retain_set[retain_set["id"].isin(retain_train_ids)]
-        retain_validation_df = retain_set[retain_set["id"].isin(retain_val_ids)]
-
-        #save each
+        # Save each split
         forget_train_df.to_parquet(
             os.path.join(path, "data/forget_train-00000-of-00001.parquet"),
             engine="pyarrow",
@@ -105,27 +150,28 @@ def download_datasets(
             engine="pyarrow",
         )
 
+    # Load from cached parquet files
     retain_train_df = pd.read_parquet(
         os.path.join(path, "data/retain_train-00000-of-00001.parquet"),
         engine="pyarrow",
-    )  # Retain split: train set
+    )
     retain_validation_df = pd.read_parquet(
         os.path.join(path, "data/retain_validation-00000-of-00001.parquet"),
         engine="pyarrow",
-    )  # Retain split: validation set
+    )
     forget_train_df = pd.read_parquet(
         os.path.join(path, "data/forget_train-00000-of-00001.parquet"),
         engine="pyarrow",
-    )  # Forget split: train set
+    )
     forget_validation_df = pd.read_parquet(
         os.path.join(path, "data/forget_validation-00000-of-00001.parquet"),
         engine="pyarrow",
-    )  # Forget split: validation set
+    )
     return retain_train_df, retain_validation_df, forget_train_df, forget_validation_df
 
 
 def main(args):
-    download_model(os.path.join(args.path, "semeval25-unlearning-model"))
+    download_model(os.path.join(args.path, "semeval25-unlearning-model"), model_type="Llama-2-7b-chat")
     download_model_1B(
         os.path.join(args.path, "semeval25-unlearning-1B-model")
     )

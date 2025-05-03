@@ -6,8 +6,9 @@ class LoRALinear(torch.nn.Module):
         super().__init__()
 
         self.original: torch.nn.Linear = original
-        self.A: torch.nn.Linear = torch.nn.Linear(original.in_features, rank, bias=False)
-        self.B: torch.nn.Linear = torch.nn.Linear(rank, original.out_features, bias=False)
+        # Create LoRA layers with bfloat16
+        self.A: torch.nn.Linear = torch.nn.Linear(original.in_features, rank, bias=False, dtype=torch.bfloat16)
+        self.B: torch.nn.Linear = torch.nn.Linear(rank, original.out_features, bias=False, dtype=torch.bfloat16)
 
         self.alpha = alpha
         self.rank = rank

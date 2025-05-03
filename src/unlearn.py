@@ -19,7 +19,7 @@ from unlearn_loading import download_model, download_datasets, download_model_1B
 parser = argparse.ArgumentParser()
 
 parser.add_argument(
-    "--model", default="1B", type=str, choices=["1B", "7B"], help="Model to use."
+    "--model", default="1B", type=str, choices=["1B", "7B", "Llama-3.2-1B", "Llama-2-7b-chat"], help="Model to use."
 )
 parser.add_argument("--logdir", default="logs", type=str, help="Logdir.")
 
@@ -111,9 +111,13 @@ def main(args: argparse.Namespace):
     retain_train, retain_val, forget_train, forget_val = download_datasets()
 
     if args.model == "7B":
-        model, tokenizer = download_model()
+        model, tokenizer = download_model(model_type="OLMo")
+    elif args.model == "Llama-3.2-1B":
+        model, tokenizer = download_model_1B(model_type="Llama-3.2-1B")
+    elif args.model == "Llama-2-7b-chat":
+        model, tokenizer = download_model(model_type="Llama-2-7b-chat")
     else:
-        model, tokenizer = download_model_1B()
+        model, tokenizer = download_model_1B(model_type="1B")
 
     unlearned_model = unlearn(model, tokenizer, retain_train, forget_train, args)
 

@@ -23,11 +23,17 @@ def prepare_data(
             max_length=2048,
             truncation=True,
         )
-        # get the range of output
-        output_beginning = tokenized.char_to_token(0, sequence_index=1)
-        output_end = (
-            tokenized.char_to_token(len(example["output"]) - 1, sequence_index=1) + 1
-        )
+        
+        # Try to get output range using char_to_token if available
+        try:
+            output_beginning = tokenized.char_to_token(0, sequence_index=1)
+            output_end = tokenized.char_to_token(len(example["output"]) - 1, sequence_index=1) + 1
+        except (ValueError, AttributeError):
+            # Fallback: Calculate output range based on the length of input
+            input_tokens = tokenizer(example["input"], return_tensors="pt")["input_ids"].shape[1]
+            output_beginning = input_tokens  # Start after input
+            output_end = tokenized["input_ids"].shape[1]  # End at the final token
+        
         # squeeze tensors
         tokenized["input_ids"] = tokenized["input_ids"].squeeze()
         tokenized["attention_mask"] = tokenized["attention_mask"].squeeze()
