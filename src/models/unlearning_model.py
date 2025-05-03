@@ -34,6 +34,12 @@ class UnlearningModel(torch.nn.Module):
         self._tokenizer = tokenizer
 
         self.logdir, self._writers = args.logdir, {}
+        
+        # Initialize loss tracking lists
+        self.forget_losses = []
+        self.retain_losses = []
+        self.total_losses = []
+        self.current_step = 0
 
         self._optimizer = torch.optim.Adam(self.parameters(), lr=args.learning_rate)
         self.to(self._device)
@@ -69,6 +75,12 @@ class UnlearningModel(torch.nn.Module):
                 tasks = tasks.to(self._device)
 
                 losses = self.train_step(inputs, answer_mask, tasks)
+                
+                # Record losses
+                self.current_step += 1
+                self.forget_losses.append(losses["npo_loss"])
+                self.retain_losses.append(losses["retain_loss"])
+                self.total_losses.append(losses["total_loss"])
 
                 train_steps += 1
                 if (
@@ -105,6 +117,9 @@ class UnlearningModel(torch.nn.Module):
             if (args.save_every >= 1) and (((epoch + 1) % args.save_every) == 0):
                 print("Saving checkpoint")
                 self.save_checkpoint(os.path.join(args.logdir, f"checkpoint_{epoch}"))
+        
+        # Plot losses at the end of training
+        self.plot_losses()
         pass
 
     def train_step(self, inputs, answer_mask, tasks):
@@ -123,44 +138,30 @@ class UnlearningModel(torch.nn.Module):
             attention_mask=torch.as_tensor(inputs.attention_mask),
         )
 
-        ref_logprob = F.log_softmax(reference_output.logits[:, :-1, :], dim=-1).gather(
-            2, inputs.input_ids[:, 1:].unsqueeze(-1)
-        )
-        logprob = F.log_softmax(outputs.logits[:, :-1, :], dim=-1).gather(
-            2, inputs.input_ids[:, 1:].unsqueeze(-1)
-        )
+        # Compute loss for forget samples
+        tasks_expanded = tasks.unsqueeze(1).expand(-1, answer_mask.size(1)-1)  # [batch_size, seq_len-1]
+        forget_mask = (tasks_expanded == 1) & (answer_mask[:, 1:] == 1)
+        if forget_mask.any():
+            # print("yes, forget_mask")
+            logits = outputs.logits[:, :-1][forget_mask]
+            input_ids = inputs.input_ids[:, 1:][forget_mask]
+            forget_loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), input_ids.reshape(-1), reduction='none')
+            forget_loss = forget_loss.mean() - self._args.gamma  # Subtract gamma as per SimNPO
+            forget_loss = -F.logsigmoid(self._args.beta * forget_loss).mean() * 2 / self._args.beta
+        else:
+            forget_loss = torch.tensor(0.0).to(self._device)
 
-        forget_logprob = logprob[tasks == 1][answer_mask[tasks == 1][:, 1:] == 1]
-        forget_ref_logprob = ref_logprob[tasks == 1][
-            answer_mask[tasks == 1][:, 1:] == 1
-        ]
+        # Compute loss for retain samples
+        retain_mask = (tasks_expanded == 0) & (answer_mask[:, 1:] == 1)
+        if retain_mask.any():
+            logits = outputs.logits[:, :-1][retain_mask]
+            input_ids = inputs.input_ids[:, 1:][retain_mask]
+            retain_loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), input_ids.reshape(-1), reduction='mean')
+        else:
+            retain_loss = torch.tensor(0.0).to(self._device)
 
-        npo_loss: torch.Tensor = (
-            -F.logsigmoid(
-                self._args.beta * (forget_ref_logprob - forget_logprob)
-            ).mean()
-            * 2
-            / self._args.beta
-        )
-        npo_loss = npo_loss.nan_to_num()
-
-        retain_logprob = logprob[tasks == 0][answer_mask[tasks == 0][:, 1:] == 1]
-        retain_ref_logprob = ref_logprob[tasks == 0][
-            answer_mask[tasks == 0][:, 1:] == 1
-        ]
-
-        retain_loss = -retain_logprob.mean()
-        retain_loss = retain_loss.nan_to_num()
-
-        kl_retain_loss = F.kl_div(
-            retain_logprob, retain_ref_logprob, reduction="batchmean", log_target=True
-        ).nan_to_num()
-
-        loss = (
-            self._args.npo_mult * npo_loss
-            + self._args.rt_mult * retain_loss
-            + self._args.kl_mult * kl_retain_loss
-        )
+        # Combine losses as per SimNPO (npo_coeff for forget_loss and grad_diff_coeff for retain_loss)
+        loss = self._args.npo_mult * forget_loss + self._args.rt_mult * retain_loss
 
         loss.backward()
         self._optimizer.step()
@@ -168,9 +169,9 @@ class UnlearningModel(torch.nn.Module):
 
         return {
             "total_loss": loss.item(),
-            "npo_loss": npo_loss.item(),
+            "npo_loss": forget_loss.item(),
             "retain_loss": retain_loss.item(),
-            "kl_retain_loss": kl_retain_loss.item(),
+            "kl_retain_loss": 0.0,  # No longer using KL loss
             "forget_count": tasks.sum().item(),
             "retain_count": (1 - tasks).sum().item(),
         }
@@ -247,3 +248,89 @@ class UnlearningModel(torch.nn.Module):
         extracted_model.save_pretrained(path)
         self._tokenizer.save_pretrained(path)
         self._llm.to(self._device)
+
+    def plot_losses(self):
+        """Plot the training losses and save separate figures for each loss type."""
+        try:
+            import matplotlib.pyplot as plt
+            
+            # Plot forget loss
+            plt.figure(figsize=(10, 6))
+            plt.plot(self.forget_losses, color='red', alpha=0.7)
+            plt.xlabel('Training Steps')
+            plt.ylabel('Loss')
+            plt.title('Forget Loss Over Time')
+            plt.grid(True, alpha=0.3)
+            plt.savefig(os.path.join(self.logdir, 'forget_loss.png'))
+            plt.close()
+            
+            # Plot retain loss
+            plt.figure(figsize=(10, 6))
+            plt.plot(self.retain_losses, color='blue', alpha=0.7)
+            plt.xlabel('Training Steps')
+            plt.ylabel('Loss')
+            plt.title('Retain Loss Over Time')
+            plt.grid(True, alpha=0.3)
+            plt.savefig(os.path.join(self.logdir, 'retain_loss.png'))
+            plt.close()
+            
+            # Plot total loss
+            plt.figure(figsize=(10, 6))
+            plt.plot(self.total_losses, color='purple', alpha=0.7)
+            plt.xlabel('Training Steps')
+            plt.ylabel('Loss')
+            plt.title('Total Loss Over Time')
+            plt.grid(True, alpha=0.3)
+            plt.savefig(os.path.join(self.logdir, 'total_loss.png'))
+            plt.close()
+
+            # Add smoothed versions of the plots using moving average
+            window_size = 50  # Adjust this value to control smoothing
+            
+            def moving_average(data, window_size):
+                weights = np.ones(window_size) / window_size
+                return np.convolve(data, weights, mode='valid')
+            
+            import numpy as np
+            
+            # Smoothed forget loss
+            plt.figure(figsize=(10, 6))
+            smoothed_forget = moving_average(self.forget_losses, window_size)
+            plt.plot(smoothed_forget, color='red', alpha=0.9, label='Smoothed')
+            plt.plot(self.forget_losses, color='red', alpha=0.2, label='Raw')
+            plt.xlabel('Training Steps')
+            plt.ylabel('Loss')
+            plt.title('Smoothed Forget Loss Over Time')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.savefig(os.path.join(self.logdir, 'forget_loss_smoothed.png'))
+            plt.close()
+            
+            # Smoothed retain loss
+            plt.figure(figsize=(10, 6))
+            smoothed_retain = moving_average(self.retain_losses, window_size)
+            plt.plot(smoothed_retain, color='blue', alpha=0.9, label='Smoothed')
+            plt.plot(self.retain_losses, color='blue', alpha=0.2, label='Raw')
+            plt.xlabel('Training Steps')
+            plt.ylabel('Loss')
+            plt.title('Smoothed Retain Loss Over Time')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.savefig(os.path.join(self.logdir, 'retain_loss_smoothed.png'))
+            plt.close()
+            
+            # Smoothed total loss
+            plt.figure(figsize=(10, 6))
+            smoothed_total = moving_average(self.total_losses, window_size)
+            plt.plot(smoothed_total, color='purple', alpha=0.9, label='Smoothed')
+            plt.plot(self.total_losses, color='purple', alpha=0.2, label='Raw')
+            plt.xlabel('Training Steps')
+            plt.ylabel('Loss')
+            plt.title('Smoothed Total Loss Over Time')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.savefig(os.path.join(self.logdir, 'total_loss_smoothed.png'))
+            plt.close()
+
+        except Exception as e:
+            print(f"Error plotting losses: {e}")

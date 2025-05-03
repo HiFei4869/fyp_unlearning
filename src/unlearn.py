@@ -33,7 +33,8 @@ parser.add_argument("--batch_size", default=4, type=int, help="Batch size.")
 parser.add_argument("--epochs", default=20, type=int, help="Number of unlearning epochs.")
 parser.add_argument("--learning_rate", default=1e-4, type=float, help="Learning rate.")
 
-parser.add_argument("--beta", default=0.5, type=float, help="Beta for NPO loss.")
+parser.add_argument("--beta", default=2.5, type=float, help="Beta for NPO loss.")
+parser.add_argument("--gamma", default=0.0, type=float, help="Gamma threshold for SimNPO loss.")
 
 parser.add_argument(
     "--npo_mult", default=1.0, type=float, help="NPO forget loss multiplier."
