@@ -142,11 +142,14 @@ class UnlearningModel(torch.nn.Module):
         tasks_expanded = tasks.unsqueeze(1).expand(-1, answer_mask.size(1)-1)  # [batch_size, seq_len-1]
         forget_mask = (tasks_expanded == 1) & (answer_mask[:, 1:] == 1)
         if forget_mask.any():
-            # print("yes, forget_mask")
             logits = outputs.logits[:, :-1][forget_mask]
             input_ids = inputs.input_ids[:, 1:][forget_mask]
+            # Compute loss per token
             forget_loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), input_ids.reshape(-1), reduction='none')
-            forget_loss = forget_loss.mean() - self._args.gamma  # Subtract gamma as per SimNPO
+            # Reshape to [batch_size, seq_len] and compute mean per sequence
+            forget_loss = forget_loss.reshape(logits.size(0), -1)
+            forget_loss = forget_loss.sum(-1) / forget_loss.size(-1)  # Average over sequence length
+            forget_loss = forget_loss.mean() - self._args.gamma  # Average over batch and subtract gamma
             forget_loss = -F.logsigmoid(self._args.beta * forget_loss).mean() * 2 / self._args.beta
         else:
             forget_loss = torch.tensor(0.0).to(self._device)
