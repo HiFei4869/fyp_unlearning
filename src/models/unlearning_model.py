@@ -40,6 +40,14 @@ class UnlearningModel(torch.nn.Module):
         self.retain_losses = []
         self.total_losses = []
         self.current_step = 0
+        
+        # For dynamic rt_mult control
+        self.initial_retain_loss = None
+        self.rt_mult_min = 0.1  # minimum rt_mult value
+        self.rt_mult_max = 2.0  # maximum rt_mult value
+        self.rt_mult_a = 0.3    # exponential scaling parameter a
+        self.rt_mult_b = 6.0    # exponential scaling parameter b
+        self.rt_mult_c = 0.8    # exponential scaling parameter c
 
         self._optimizer = torch.optim.Adam(self.parameters(), lr=args.learning_rate)
         self.to(self._device)
@@ -163,8 +171,11 @@ class UnlearningModel(torch.nn.Module):
         else:
             retain_loss = torch.tensor(0.0).to(self._device)
 
-        # Combine losses as per SimNPO (npo_coeff for forget_loss and grad_diff_coeff for retain_loss)
-        loss = self._args.npo_mult * forget_loss + self._args.rt_mult * retain_loss
+        # Calculate dynamic rt_mult based on retain loss
+        current_rt_mult = self.calculate_dynamic_rt_mult(retain_loss.item())
+
+        # Combine losses using dynamic rt_mult
+        loss = self._args.npo_mult * forget_loss + current_rt_mult * retain_loss
 
         loss.backward()
         self._optimizer.step()
@@ -177,7 +188,27 @@ class UnlearningModel(torch.nn.Module):
             "kl_retain_loss": 0.0,  # No longer using KL loss
             "forget_count": tasks.sum().item(),
             "retain_count": (1 - tasks).sum().item(),
+            "rt_mult": current_rt_mult,  # Add rt_mult to logging
         }
+
+    def calculate_dynamic_rt_mult(self, current_retain_loss):
+        """Calculate dynamic rt_mult based on retain loss changes."""
+        # At epoch 0, initialize the baseline retain loss
+        if self.initial_retain_loss is None:
+            self.initial_retain_loss = current_retain_loss
+            return self.rt_mult_min
+
+        # Calculate change in retain loss
+        delta_L = current_retain_loss - self.initial_retain_loss
+        
+        # Calculate gamma (rt_mult) using exponential scaling
+        gamma = self.rt_mult_a * (self.rt_mult_b ** delta_L) + self.rt_mult_c
+        gamma_rounded = round(gamma, 1)
+        
+        # Clip between min and max thresholds
+        rt_mult = min(max(gamma_rounded, self.rt_mult_min), self.rt_mult_max)
+        
+        return rt_mult
 
     def forward(self, x, **xs):
         return self._llm(x, **xs)

@@ -9,11 +9,16 @@ class LoRAModel(torch.nn.Module):
         model: AutoModelForCausalLM,
         rank: int,
         alpha: float,
-        to_adapt: list[str] = ["q_proj", "v_proj"],
+        to_adapt: list[str] = [f"model.layers.{i}.self_attn.{proj}" 
+                              for i in range(6)  # layers 0 to 5
+                              for proj in ['q_proj', 'k_proj', 'v_proj']],
     ):
         super().__init__()
         self._llm: AutoModelForCausalLM = model
         self._loras: list[LoRALinear] = []
+
+        # Count total parameters before freezing
+        total_params = sum(p.numel() for p in self._llm.parameters())
 
         # freeze all parameters of the llm
         for param in self._llm.parameters():
@@ -21,6 +26,7 @@ class LoRAModel(torch.nn.Module):
 
         # change projections selected projections to LoRALinear
         modules = list(self._llm.named_modules())
+        trainable_params = 0
         for name, module in modules:
             if isinstance(module, torch.nn.Linear) and any(
                 proj in name for proj in to_adapt
@@ -32,7 +38,12 @@ class LoRAModel(torch.nn.Module):
                 self._loras.append(lora)
                 lora.A.weight.requires_grad = True
                 lora.B.weight.requires_grad = True
+                trainable_params += lora.A.weight.numel() + lora.B.weight.numel()
                 setattr(parent_module, attr_name, lora)
+        
+        print(f"Total parameters: {total_params:,}")
+        print(f"Trainable parameters: {trainable_params:,}")
+        print(f"Percentage of trainable parameters: {(trainable_params/total_params)*100:.2f}%")
 
     def only_backbone(self, only_backbone: bool) -> None:
         for lora in self._loras:
