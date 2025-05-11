@@ -40,14 +40,15 @@ class UnlearningModel(torch.nn.Module):
         self.retain_losses = []
         self.total_losses = []
         self.current_step = 0
+        self.forget_counts = []
         
         # For dynamic rt_mult control
         self.initial_retain_loss = None
         self.rt_mult_min = 0.1  # minimum rt_mult value
-        self.rt_mult_max = 2.0  # maximum rt_mult value
-        self.rt_mult_a = 0.3    # exponential scaling parameter a
-        self.rt_mult_b = 6.0    # exponential scaling parameter b
-        self.rt_mult_c = 0.8    # exponential scaling parameter c
+        self.rt_mult_max = 1.0  # maximum rt_mult value
+        self.rt_mult_a = args.rt_mult_a    # exponential scaling parameter a
+        self.rt_mult_b = args.rt_mult_b    # exponential scaling parameter b
+        self.rt_mult_c = args.rt_mult_c    # exponential scaling parameter c
 
         self._optimizer = torch.optim.Adam(self.parameters(), lr=args.learning_rate)
         self.to(self._device)
@@ -82,6 +83,10 @@ class UnlearningModel(torch.nn.Module):
                 ranges = ranges.to(self._device)
                 tasks = tasks.to(self._device)
 
+                # Record the number of forget & retain
+                # self.forget_counts.append(tasks)
+                # print(f"task:{tasks}")
+                # print(f"answer:{answer_mask} size:{answer_mask.size()}")
                 losses = self.train_step(inputs, answer_mask, tasks)
                 
                 # Record losses
