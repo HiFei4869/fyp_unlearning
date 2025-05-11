@@ -7,7 +7,7 @@ uv.lock
 # downloaded models/datasets
 # bitnet_b1_58-xl/
 # bitnet_b1_58-large/
-semeval25-unlearning-data/
+unlearning-data/
 semeval25-unlearning-model/
 semeval25-unlearning-1B-model/
 
