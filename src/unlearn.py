@@ -34,13 +34,22 @@ parser.add_argument("--epochs", default=20, type=int, help="Number of unlearning
 parser.add_argument("--learning_rate", default=1e-4, type=float, help="Learning rate.")
 
 parser.add_argument("--beta", default=2.5, type=float, help="Beta for NPO loss.")
-parser.add_argument("--gamma", default=0.0, type=float, help="Gamma threshold for SimNPO loss.")
+parser.add_argument("--gamma", default=0.03, type=float, help="Gamma threshold for SimNPO loss.")
 
 parser.add_argument(
     "--npo_mult", default=1.0, type=float, help="NPO forget loss multiplier."
 )
 parser.add_argument(
     "--rt_mult", default=1.0, type=float, help="NLL retain loss multiplier."
+)
+parser.add_argument(
+    "--rt_mult_a", default=0.3, type=float, help="Exponential scaling parameter a for dynamic rt_mult control."
+)
+parser.add_argument(
+    "--rt_mult_b", default=6.0, type=float, help="Exponential scaling parameter b for dynamic rt_mult control."
+)
+parser.add_argument(
+    "--rt_mult_c", default=0.8, type=float, help="Exponential scaling parameter c for dynamic rt_mult control."
 )
 parser.add_argument(
     "--kl_mult", default=0.5, type=float, help="KL divergence retain loss multiplier."
@@ -109,7 +118,8 @@ def main(args: argparse.Namespace):
     with open("logdir.txt", "w") as f:
         f.write(f"{args.logdir}")
 
-    retain_train, retain_val, forget_train, forget_val = download_datasets()
+    # Get datasets (validation sets will be empty)
+    retain_train, _, forget_train, _ = download_datasets()
 
     if args.model == "7B":
         model, tokenizer = download_model(model_type="OLMo")
