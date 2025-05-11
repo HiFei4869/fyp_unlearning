@@ -12,9 +12,9 @@ The `requirements.txt` file is also present for pip setup.
 
 ## Running the project
 
-All available arguments may be listed using:
+Run the unlearning script:
 ```bash
-uv run src/unlearn.py --help
+uv run src/unlearn.py
 ```
 
 Important arguments:
@@ -41,4 +41,21 @@ Important arguments:
                         Save checkpoint every n epochs. `-1` means never.
   --save_model, --no-save_model
                         Save model after training.
+```
+
+The script will automatically download the TOFU retain90 and forget10 data to the path `unlearning_data`.
+
+## Evaluation
+Follow the instruction in https://github.com/locuslab/open-unlearning for evaluation.
+
+The evaluation script is as follows:
+```bash
+  model=Llama-2-7b-chat-hf \
+  log_dir=PATH_TO_LOGDIR_CHECKPOINT \
+  task_name=YOUR_TASK_NAME \
+  python src/eval.py --config-name=eval.yaml experiment=eval/tofu/default \
+    model=${model} \
+    model.model_args.pretrained_model_name_or_path=${log_dir} \
+    retain_logs_path=saves/eval/tofu_${model}_retain90/TOFU_EVAL.json \
+    task_name=${task_name}
 ```
