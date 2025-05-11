@@ -7,6 +7,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import os
 import argparse
 import torch
+from datasets import load_dataset
 
 def download_model(
     path="semeval25-unlearning-model",
@@ -87,8 +88,8 @@ def download_model_1B(
 
 
 def download_datasets(
-    path="semeval25-unlearning-data",
-    val_split=0.1,
+    path="unlearning-data",
+    val_split=0.0,  # Changed from 0.1 to 0.0 to use all data for training
     seed=42
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Download and process TOFU datasets"""
@@ -97,33 +98,33 @@ def download_datasets(
         os.makedirs(path + "/data", exist_ok=True)
 
         # Load datasets
-        forget_ds = load_dataset("locuslab/TOFU", "forget01")["train"]
-        retain_ds = load_dataset("locuslab/TOFU", "retain99")["train"]
+        forget_ds = load_dataset("locuslab/TOFU", "forget10")["train"]
+        retain_ds = load_dataset("locuslab/TOFU", "retain90")["train"]
 
-        # Split into train/val
-        forget_splits = forget_ds.train_test_split(test_size=val_split, seed=seed)
-        retain_splits = retain_ds.train_test_split(test_size=val_split, seed=seed)
-
-        # Transform format and add IDs
-        forget_train = forget_splits["train"].map(
+        # Use all data for training (no validation split)
+        forget_train = forget_ds.map(
             lambda x: transform_dataset_format(x, start_id=0, is_forget=True),
             batched=True,
-            remove_columns=forget_splits["train"].column_names
+            remove_columns=forget_ds.column_names
         )
-        forget_val = forget_splits["test"].map(
+        
+        # Create empty validation sets
+        forget_val = forget_ds.select([]).map(
             lambda x: transform_dataset_format(x, start_id=len(forget_train), is_forget=True),
             batched=True,
-            remove_columns=forget_splits["test"].column_names
+            remove_columns=forget_ds.column_names
         )
-        retain_train = retain_splits["train"].map(
+        
+        retain_train = retain_ds.map(
             lambda x: transform_dataset_format(x, start_id=len(forget_train) + len(forget_val), is_forget=False),
             batched=True,
-            remove_columns=retain_splits["train"].column_names
+            remove_columns=retain_ds.column_names
         )
-        retain_val = retain_splits["test"].map(
+        
+        retain_val = retain_ds.select([]).map(
             lambda x: transform_dataset_format(x, start_id=len(forget_train) + len(forget_val) + len(retain_train), is_forget=False),
             batched=True,
-            remove_columns=retain_splits["test"].column_names
+            remove_columns=retain_ds.column_names
         )
 
         # Convert to pandas and save
@@ -168,6 +169,32 @@ def download_datasets(
         engine="pyarrow",
     )
     return retain_train_df, retain_validation_df, forget_train_df, forget_validation_df
+
+
+def transform_dataset_format(example, start_id=0, is_forget=False) -> dict:
+    """Transform the dataset format from TOFU to our required format.
+    
+    Args:
+        example: Example from TOFU dataset containing question and answer
+        start_id: Starting ID for this batch of examples
+        is_forget: Whether this is from the forget dataset
+    
+    Returns:
+        Transformed example with input, output, and id fields
+    """
+    # Get batch size from question field
+    batch_size = len(example["question"])
+    
+    # Create sequential IDs for the batch
+    ids = list(range(start_id, start_id + batch_size))
+    
+    # For batched input, example["question"] and example["answer"] are already lists
+    return {
+        "input": example["question"],
+        "output": example["answer"],
+        "id": ids,
+        "is_forget": [is_forget] * batch_size
+    }
 
 
 def main(args):
