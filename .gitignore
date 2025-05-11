@@ -31,4 +31,4 @@ hf_token.txt
 
 logdir.txt
 
-jupyter/unrelated/checkpoint*
+# jupyter/unrelated/checkpoint*
