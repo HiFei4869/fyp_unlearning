@@ -45,6 +45,7 @@ def prepare_data(
         tokenized_forget = forget_set.apply(tokenize_function, axis=1, args=(1,))
         # combine forget and retain sets into one
         tokenized = pd.concat([tokenized_retain, tokenized_forget], ignore_index=True)
+        # tokenized = pd.concat([tokenized_forget, tokenized_retain], ignore_index=True)
         return tokenized
 
     return prepare_dataset(retain, forget)

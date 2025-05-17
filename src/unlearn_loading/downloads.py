@@ -10,7 +10,7 @@ import torch
 from datasets import load_dataset
 
 def download_model(
-    path="semeval25-unlearning-model",
+    path="Llama-2-7b",
     model_type="OLMo"
 ) -> tuple[AutoModelForCausalLM, AutoTokenizer]:
     """Download and load the specified model.
@@ -51,7 +51,7 @@ def download_model(
 
 
 def download_model_1B(
-    path="semeval25-unlearning-1B-model",
+    path="1B-model",
     model_type="1B"
 ) -> tuple[AutoModelForCausalLM, AutoTokenizer]:
     """Download and load the specified 1B model.
@@ -198,11 +198,11 @@ def transform_dataset_format(example, start_id=0, is_forget=False) -> dict:
 
 
 def main(args):
-    download_model(os.path.join(args.path, "semeval25-unlearning-model"), model_type="Llama-2-7b-chat")
+    download_model(os.path.join(args.path, "Llama-2-7b"), model_type="Llama-2-7b-chat")
     download_model_1B(
-        os.path.join(args.path, "semeval25-unlearning-1B-model")
+        os.path.join(args.path, "1B-model")
     )
-    download_datasets(os.path.join(args.path, "semeval25-unlearning-data"))
+    download_datasets(os.path.join(args.path, "unlearning-data"))
 
 
 if __name__ == "__main__":
